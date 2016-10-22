@@ -1,121 +1,139 @@
-#Retrieve route passengers orders probability distribution
-orders_distr<-read.csv("orderHist.csv",header=TRUE,colClasses = c("character","numeric"), sep=";")
-barplot(height=orders_distr$prob, names.arg = orders_distr$route, ylab = "Probability", xlab = "Route")
+#Libraries
+#install.packages("purrr")
+library(purrr)
 
 
 #Initialize test variables
 inputs<-list(
   seats=5,
   sample_size=5,
-  stops=as.numeric(max(unlist(strsplit(orders_distr$route,":"))))-1
+  stops=7,
+  path="orders_hist.csv"
 )
 
+#Retrieve route passengers orders probability distribution or generates a random one
+if(is.character(inputs$path)){
+  orders_distr<-read.csv(inputs$path,header=TRUE,colClasses = c("character","numeric"), sep=";")
+  inputs$stops=max(as.numeric(unlist(strsplit(orders_distr$route,":"))))-1
+}else{
+  result <- expand.grid(1:inputs$stops,1:inputs$stops)
+  result <-result[result[,2]>result[,1],]
+  r_routes<-apply(result,1,function(x){paste(x[1],":",x[2])})
+  samp<-abs(rnorm(length(r_routes)-1))
+  r_prob<-samp/sum(samp)
+  orders_distr<-data.frame(r_routes,r_prob,1)
+  names(orders_distr) <- c("route","prob","price")
+}
+
+barplot(height=orders_distr$prob, names.arg = orders_distr$route, ylab = "Probability", xlab = "Route")
+
 #Create random order sample according to given distribution
-create_sample<-function(orders_distr=orders_distr,inputs=inputs,output="sample"){
-  
-  #Create sample from distribution    
-  orders_sample<-sample(orders_distr$route, size=inputs$sample_size, replace=TRUE, prob=orders_distr$prob)
-  
+create_sample_orders<-function(routes=orders_distr$route,probability=orders_distr$prob,inp=inputs,output="sample"){
+
+#Create sample from distribution    
+orders_sample<-sample(routes, size=inp$sample_size, replace=TRUE, prob=probability)
+
   #Return list of orders / or show sample
   if(output=="plot"){
     orders_tbl<-table(orders_sample)
     return(barplot(height = orders_tbl,  ylab = "Number of Orders", xlab = "Route"))
   }else{
     orders_list<-map(strsplit(orders_sample,":"),as.numeric)
-    
-    
+  #This change will revert the stops to intervals eg instead of seat 1,2 to routes 1-2,2-3
+    orders_list<-map(orders_list,function(x){c(x[1],x[2]-1)})
   }
-}
+} 
 
 #This function checks which seats are available for the given order and returns their position or returns false if no free seats are available
 is_free<-function(vehicle,order){
   #turn the seats in bool values
-  free_positions<-vehicle!=0
+  free_positions<-rowSums(vehicle[,order[1]:order[2]])==0
   
   if (length(order)==1){ 
-    free_seats<-which(free_positions[,order[1]]==0) 
+    warning("There is just one number in the interval - check the data")
+    return(FALSE)
   }else{
-    free_seats<-which((free_positions[,order[1]:order[2]])==0)
+    free_seats<-which(free_positions)
   }
-  
-  if(length(free_seats)==0) FALSE else free_seats
-  
+    if(length(free_seats)==0) FALSE else free_seats
+}
+
+#This function mimics the original algoritm
+find_seat_orig<-function(vehicle,order){
+#It looks for empty seats
+  free_seats<-is_free(vehicle,order)
+#If there are empty seats it returns the first one 
+  if (is.numeric(free_seats)){
+    seat<-free_seats[1]
+  }else{
+#Otherwise returns false
+    return(FALSE)
+  }
+
 }
 
 
-#This function mimics the original algoritm
-
-fill_vehicle_orig<-function(seats,stops,orders_distr, algoritm){
+#tests the choden algoritm and returns the results
+fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,distr=orders_distr,find_seat=find_seat_orig){
   
   #create the empty vehicle
-  vehicle<-matrix(data=0,nrow=input$seats,ncol=input$stops)
+  vehicle<-matrix(data=0,ncol=stops,nrow=seats)
   
   #create the order list
-  orders<-create_sample(orders_distr)
+  orders<-create_sample_orders()
   
-  #fill the vehicle with people
+  #create the result variables
+  sitting_plot<-c()
+  seated_people<-data.frame(data=0,nrow=stops,ncol=3)
+  names(seated_people) <- c("order","seated","not_seated")
+  result<-c()
   
-  for (i in 1:seq_along(orders)){
-    
-    order<-orders[[i]]
-    free_seats<-is_free(vehicle,order)
-    
-    if (!free_seats){vehicle[free_seats[1],order[1]:order[2]]
+  #takes the orders ans sits people by the chosen method
+  for (i in seq_along(orders)) {
+    order<-unlist(orders[i])
+    j<-i-1
+    free_seat<-find_seat(vehicle,order)
+    if (is.numeric(free_seat)){
+      vehicle[free_seat,order[1]:order[2]]<-i
+      
+      plot(row~col,data=which(vehicle==0|1,arr.ind = T),xlab = "intervals between stops",ylab="seat number")
+      points(row~col,data=which(vehicle!=0,arr.ind = T),pch=19)
+      points(expand.grid(order[1]:order[2],free_seat),col="green",pch=19)
+      
+      sitting_plot<-c(recordPlot())
+      if(i>1){
+        seated_people[i,]<-c(i, seated_people[j,2]+1,seated_people[j,3])
+      }else{
+        seated_people[i,]<-c(i,1,0)
+      }
+    }else{
+      
+      if(i>1){  
+        seated_people[i,]<-c(i, seated_people[j,2],seated_people[j,3]+1)
+      }else{
+        seated_people[i,]<-c(i,0,1)
+      }
     }
   }
   
+  #Now make measurements and pass the results
+  seated_people$effectivity<-(seated_people$seated/seated_people$order)
+  effective_breaking_point<-which.min(seated_people$effectivity>0,5)
+  util<-sum(vehicle!=0)/(seats*stops)
+  
+  test_results
+  <-list(
+                seat_order=seated_people,
+                break_point=effective_breaking_point,
+                vehicle=vehicle,
+                plots=sitting_plot,
+                utilization=util
+                )
   
 }
 
-result<-c(result,sum(sedadla!=0)/(seats*stops))
 
 
-result<-NULL
-result2<-NULL
-i<-NULL
-j<-NULL
-c<-NULL
-c<-c+1
-for (i in 1:1000){
   
   
-  
-  
-  sedadla2<-matrix(data=0,nrow=122,ncol=8)
-  
-  
-  
-  
-  for (objednavka2 in objednavky){
-    objednavka<-as.numeric(objednavka2)
-    j<-j+1
-    if (sum(rowSums(sedadla2[,objednavka[1]:objednavka[2]])==0)>0){
-      if (length(objednavka)==1){ 
-        pozice<-which(sedadla2[,objednavka[1]:objednavka[1]]==0) }
-      else{
-        pozice<-which(rowSums(sedadla2[,objednavka[1]:objednavka[2]])==0)}
-      if (length(pozice)!=1){
-        sedadla3<-sedadla2
-        sedadla3[pozice,objednavka[1]:objednavka[2]]<-1
-        entropie<-rowSums(!(sedadla3[pozice,-8]==sedadla3[pozice,-1]))
-        #entropie<-abs(rowSums(sedadla3[pozice,])-8)
-        minEnt<-which.min(entropie)
-        sedadla2[pozice[minEnt],objednavka[1]:objednavka[2]]<-1
-      }
-      else{
-        sedadla2[pozice[1],objednavka[1]:objednavka[2]]<-1
-      }
-    }else{
-      result2<-c(result2,sum(sedadla2)/(122*8))
-      break}
-  }
-}
-
-hist(result, breaks=50, main="Klasický model")
-mainresult<-mean(result)
-pocetLidi<-matrix(data=0,nrow=1,ncol=2)
-pocetLidi[c,1]<-i
-pocetLidi[c,2]<-j
-
-hist(result2, breaks=50,main="Entropický model")
-mainresult<-c(mainresult,mean(result2))
+ 
