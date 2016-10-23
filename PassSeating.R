@@ -1,12 +1,14 @@
 #Libraries
 #install.packages("purrr")
 library(purrr)
+library(prob)
+library(denstrip)
+library(tidyr)
 
-
-#Initialize test variables
+#Initialize global test variables
 inputs<-list(
-  seats=5,
-  sample_size=5,
+  seats=10,
+  sample_size=80,
   stops=7,
   path="orders_hist.csv"
 )
@@ -27,6 +29,18 @@ if(is.character(inputs$path)){
 
 barplot(height=orders_distr$prob, names.arg = orders_distr$route, ylab = "Probability", xlab = "Route")
 
+#Make probability table
+prob_matrix<-separate(orders_distr,"routes",c("from","to"),sep=":")
+prob_matrix<-transform(prob_matrix,from=as.numeric(from), to=as.numeric(to))
+prob_matrix[2]<-prob_matrix[2]-1
+prob_matrix2<-matrix(data=0,nrow=inputs$stops,ncol = inputs$stops)
+
+#This fills the table, so we can calculate the probability of having an order for an interval by 
+#making the sum of the area defined by the X,Y cordinates of an interval 
+for(i in 1:nrow(prob_matrix)){
+  prob_matrix2[prob_matrix[i,1],prob_matrix[i,2]]<-prob_matrix[i,3]
+}
+
 #Create random order sample according to given distribution
 create_sample_orders<-function(routes=orders_distr$route,probability=orders_distr$prob,inp=inputs,output="sample"){
 
@@ -44,10 +58,19 @@ orders_sample<-sample(routes, size=inp$sample_size, replace=TRUE, prob=probabili
   }
 } 
 
+#Create the default order list
+route_orders<-create_sample_orders()
+
+#Create the default empty vehicle
+vehicle<-matrix(data=0,ncol=inputs$stops,nrow=inputs$seats)
+
 #This function checks which seats are available for the given order and returns their position or returns false if no free seats are available
 is_free<-function(vehicle,order){
   #turn the seats in bool values
-  free_positions<-rowSums(vehicle[,order[1]:order[2]])==0
+  free_positions<-if(length(order[1]:order[2])>1){rowSums(vehicle[,order[1]:order[2]])==0
+                  }else{
+                    vehicle[,order[1]:order[2]]==0
+                  }
   
   if (length(order)==1){ 
     warning("There is just one number in the interval - check the data")
@@ -72,15 +95,56 @@ find_seat_orig<-function(vehicle,order){
 
 }
 
+##Probability loss algoritm
 
-#tests the choden algoritm and returns the results
-fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,distr=orders_distr,find_seat=find_seat_orig){
+#this function takes an interval and calculates the according probabilty sum
+sum_probability<-function(vec,prob=prob_matrix2){
+  if(all(is.na(vec))){
+  1 
+  }else{
+  intervals<-seqToIntervals(vec)
+  sum(apply(intervals,1,function(x){sum(prob[x[1]:x[2],x[1]:x[2]])}))
+  }
+}
+
+#Here we start the function that returns the best seat
+find_seat_probLoss<-function(vehicle=vehicle,order=order){
   
-  #create the empty vehicle
-  vehicle<-matrix(data=0,ncol=stops,nrow=seats)
+  #Find out if there are free seats for this order
+  free_seats<-is_free(vehicle,order)
+  
+  if (is.numeric(free_seats)){
+    
+    #initialize some variables we need
+    vehicle_inv<-(vehicle*-1)+1
+    prob_loss<-c()
+    for(i in seq_along(vehicle_inv[1,])){
+      vehicle_inv[vehicle_inv[,i]==1,i]<-i
+    }
+    seatsBefore<-replace(vehicle_inv,vehicle_inv==0,NaN)
+    seatsAfter<-seatsBefore
+    seatsAfter[,order[1]:order[2]]<-NaN
+    
+    #here we calculate the probability loss
+    for (i in seq_along(free_seats)){
+      before<-sum_probability(seatsBefore[free_seats[i],])
+      after<-sum_probability(seatsAfter[free_seats[i],])
+      prob_loss<-c(prob_loss,(before-after))
+    }
+    #now we find the seat that lost less probability that will be filled
+    position<-free_seats[which.min(prob_loss)]
+    
+  }else{
+    #Otherwise returns false
+    return(FALSE)
+  }
+}
+
+#Tests the chosen algoritm and returns the results
+fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,orders=route_orders,method=find_seat_orig,plot=FALSE,reorder=TRUE){
   
   #create the order list
-  orders<-create_sample_orders()
+  if(reorder){orders<-create_sample_orders()}
   
   #create the result variables
   sitting_plot<-c()
@@ -92,15 +156,16 @@ fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,distr=orders_distr,
   for (i in seq_along(orders)) {
     order<-unlist(orders[i])
     j<-i-1
-    free_seat<-find_seat(vehicle,order)
+    free_seat<-method(vehicle,order)
     if (is.numeric(free_seat)){
       vehicle[free_seat,order[1]:order[2]]<-i
-      
-      plot(row~col,data=which(vehicle==0|1,arr.ind = T),xlab = "intervals between stops",ylab="seat number")
-      points(row~col,data=which(vehicle!=0,arr.ind = T),pch=19)
-      points(expand.grid(order[1]:order[2],free_seat),col="green",pch=19)
-      
-      sitting_plot<-c(recordPlot())
+      if (plot){
+        plot(row~col,data=which(vehicle==0|1,arr.ind = T),xlab = "intervals between stops",ylab="seat number")
+        points(row~col,data=which(vehicle!=0,arr.ind = T),pch=19)
+        points(expand.grid(order[1]:order[2],free_seat),col="green",pch=19)
+        
+        sitting_plot<-c(recordPlot())
+      }
       if(i>1){
         seated_people[i,]<-c(i, seated_people[j,2]+1,seated_people[j,3])
       }else{
@@ -118,22 +183,22 @@ fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,distr=orders_distr,
   
   #Now make measurements and pass the results
   seated_people$effectivity<-(seated_people$seated/seated_people$order)
-  effective_breaking_point<-which.min(seated_people$effectivity>0,5)
+  effective_breaking_point<-which.min(seated_people$effectivity>0.5)
   util<-sum(vehicle!=0)/(seats*stops)
   
-  test_results
-  <-list(
-                seat_order=seated_people,
-                break_point=effective_breaking_point,
-                vehicle=vehicle,
-                plots=sitting_plot,
-                utilization=util
-                )
+  test_results<-list(
+    "seat_order"=seated_people,
+    "break_point"=effective_breaking_point,
+    "utilization"=util
+  )
   
 }
 
+#Function that performs multiple tests and returns the results as a list
+perform_test<-function(count,seats=inputs$seats,stops=inputs$stops,distr=orders_distr,method=find_seat_orig){
+  
+  result<-list()
+   output<-replicate(count,list(result,fill_vehicle(seats,stops,orders_sample,method,reorder=TRUE)))
+}
 
 
-  
-  
- 
