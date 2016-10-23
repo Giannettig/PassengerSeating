@@ -7,8 +7,8 @@ library(tidyr)
 
 #Initialize global test variables
 inputs<-list(
-  seats=10,
-  sample_size=80,
+  seats=122,
+  sample_size=170,
   stops=7,
   path="orders_hist.csv"
 )
@@ -33,19 +33,19 @@ barplot(height=orders_distr$prob, names.arg = orders_distr$route, ylab = "Probab
 prob_matrix<-separate(orders_distr,"routes",c("from","to"),sep=":")
 prob_matrix<-transform(prob_matrix,from=as.numeric(from), to=as.numeric(to))
 prob_matrix[2]<-prob_matrix[2]-1
-prob_matrix2<-matrix(data=0,nrow=inputs$stops,ncol = inputs$stops)
 
 #This fills the table, so we can calculate the probability of having an order for an interval by 
 #making the sum of the area defined by the X,Y cordinates of an interval 
+prob_matrix2<-matrix(data=0,nrow=inputs$stops,ncol = inputs$stops)
 for(i in 1:nrow(prob_matrix)){
   prob_matrix2[prob_matrix[i,1],prob_matrix[i,2]]<-prob_matrix[i,3]
 }
 
 #Create random order sample according to given distribution
-create_sample_orders<-function(routes=orders_distr$route,probability=orders_distr$prob,inp=inputs,output="sample"){
+create_sample_orders<-function(sample_size=inputs$sample_size,routes=orders_distr$route,probability=orders_distr$prob,inp=inputs,output="sample"){
 
 #Create sample from distribution    
-orders_sample<-sample(routes, size=inp$sample_size, replace=TRUE, prob=probability)
+orders_sample<-sample(routes, size=sample_size, replace=TRUE, prob=probability)
 
   #Return list of orders / or show sample
   if(output=="plot"){
@@ -97,7 +97,7 @@ find_seat_orig<-function(vehicle,order){
 
 ##Probability loss algoritm
 
-#this function takes an interval and calculates the according probabilty sum
+#This function takes an interval and calculates the according probabilty sum
 sum_probability<-function(vec,prob=prob_matrix2){
   if(all(is.na(vec))){
   1 
@@ -117,10 +117,11 @@ find_seat_probLoss<-function(vehicle=vehicle,order=order){
     
     #initialize some variables we need
     vehicle_inv<-(vehicle*-1)+1
-    prob_loss<-c()
     for(i in seq_along(vehicle_inv[1,])){
       vehicle_inv[vehicle_inv[,i]==1,i]<-i
     }
+    prob_loss<-c()
+  
     seatsBefore<-replace(vehicle_inv,vehicle_inv==0,NaN)
     seatsAfter<-seatsBefore
     seatsAfter[,order[1]:order[2]]<-NaN
@@ -144,34 +145,44 @@ find_seat_probLoss<-function(vehicle=vehicle,order=order){
 fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,orders=route_orders,method=find_seat_orig,plot=FALSE,reorder=TRUE){
   
   #create the order list
-  if(reorder){orders<-create_sample_orders()}
+  if(reorder){orders<-create_sample_orders(inputs$sample_size)}
   
   #create the result variables
-  sitting_plot<-c()
   seated_people<-data.frame(data=0,nrow=stops,ncol=3)
   names(seated_people) <- c("order","seated","not_seated")
   result<-c()
+  money<-0
   
   #takes the orders ans sits people by the chosen method
   for (i in seq_along(orders)) {
     order<-unlist(orders[i])
     j<-i-1
     free_seat<-method(vehicle,order)
+  #if we have a numeric position returned we proceed writing the result
     if (is.numeric(free_seat)){
       vehicle[free_seat,order[1]:order[2]]<-i
       if (plot){
         plot(row~col,data=which(vehicle==0|1,arr.ind = T),xlab = "intervals between stops",ylab="seat number")
         points(row~col,data=which(vehicle!=0,arr.ind = T),pch=19)
         points(expand.grid(order[1]:order[2],free_seat),col="green",pch=19)
-        
-        sitting_plot<-c(recordPlot())
       }
+  #We find how much we earned
+      price_pos<-which(orders_distr$routes==paste(order[1], ":", (order[2]+1), sep=""))
+      money<-money+as.numeric(orders_distr[price_pos,3])
+      
+  #We record the current state of how many passengers were sucesfully seated and not
       if(i>1){
         seated_people[i,]<-c(i, seated_people[j,2]+1,seated_people[j,3])
       }else{
         seated_people[i,]<-c(i,1,0)
       }
     }else{
+      
+      if (plot){
+        plot(row~col,data=which(vehicle==0|1,arr.ind = T),xlab = "intervals between stops",ylab="seat number")
+        points(row~col,data=which(vehicle!=0,arr.ind = T),pch=19)
+        points(expand.grid(order[1]:order[2],1),col="red",pch=19)
+      }
       
       if(i>1){  
         seated_people[i,]<-c(i, seated_people[j,2],seated_people[j,3]+1)
@@ -182,23 +193,29 @@ fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,orders=route_orders
   }
   
   #Now make measurements and pass the results
-  seated_people$effectivity<-(seated_people$seated/seated_people$order)
-  effective_breaking_point<-which.min(seated_people$effectivity>0.5)
+  seated_people$effectivity<-(seated_people$not_seated/seated_people$seated)
+  effective_breaking_point<-which.min(seated_people$effectivity<0.1)
   util<-sum(vehicle!=0)/(seats*stops)
+  empty_seats<-colSums(vehicle==0)
   
   test_results<-list(
     "seat_order"=seated_people,
     "break_point"=effective_breaking_point,
-    "utilization"=util
+    "utilization"=util,
+    "empty_seats"=empty_seats,
+    "earned"=money
   )
+  
+  #seated_people$effectivity
   
 }
 
 #Function that performs multiple tests and returns the results as a list
 perform_test<-function(count,seats=inputs$seats,stops=inputs$stops,distr=orders_distr,method=find_seat_orig){
   
-  result<-list()
-   output<-replicate(count,list(result,fill_vehicle(seats,stops,orders_sample,method,reorder=TRUE)))
+  result<-data.frame()
+   output<-replicate(count,c(result,fill_vehicle(seats,stops,orders_sample,method,reorder=TRUE)))
+   output<-as.data.frame(t(output))
 }
 
 
