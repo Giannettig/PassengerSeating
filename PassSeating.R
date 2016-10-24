@@ -116,10 +116,9 @@ find_seat_probLoss<-function(vehicle=vehicle,order=order){
   if (is.numeric(free_seats)){
     
     #initialize some variables we need
-    vehicle_inv<-(vehicle*-1)+1
-    for(i in seq_along(vehicle_inv[1,])){
-      vehicle_inv[vehicle_inv[,i]==1,i]<-i
-    }
+    vehicle_inv<-t(matrix(data=1:7,nrow=7,ncol = 3))
+    vehicle_inv[vehicle==1]<-NaN
+  
     prob_loss<-c()
   
     seatsBefore<-replace(vehicle_inv,vehicle_inv==0,NaN)
@@ -217,5 +216,6 @@ perform_test<-function(count,seats=inputs$seats,stops=inputs$stops,distr=orders_
    output<-replicate(count,c(result,fill_vehicle(seats,stops,orders_sample,method,reorder=TRUE)))
    output<-as.data.frame(t(output))
 }
+
 
 
