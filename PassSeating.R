@@ -78,7 +78,8 @@ is_free<-function(vehicle,order){
   }else{
     free_seats<-which(free_positions)
   }
-    if(length(free_seats)==0) FALSE else free_seats
+  #This will return False if no seats are available otherwise it will return the unique rows where is possible to seat someone
+    if(length(free_seats)==0) FALSE else match(data.frame(t(unique.matrix(vehicle[free_seats,]))),data.frame(t(vehicle)))
 }
 
 #This function mimics the original algoritm
