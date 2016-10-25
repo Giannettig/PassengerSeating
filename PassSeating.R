@@ -1,5 +1,8 @@
 #Libraries
 #install.packages("purrr")
+#install.packages("denstrip")
+#install.packages("prob")
+#install.packages("tidyr")
 library(purrr)
 library(prob)
 library(denstrip)
@@ -8,7 +11,7 @@ library(tidyr)
 #Initialize global test variables
 inputs<-list(
   seats=122,
-  sample_size=170,
+  sample_size=180,
   stops=7,
   path="orders_hist.csv"
 )
@@ -46,23 +49,20 @@ create_sample_orders<-function(sample_size=inputs$sample_size,routes=orders_dist
 
 #Create sample from distribution    
 orders_sample<-sample(routes, size=sample_size, replace=TRUE, prob=probability)
-
-  #Return list of orders / or show sample
-  if(output=="plot"){
-    orders_tbl<-table(orders_sample)
-    return(barplot(height = orders_tbl,  ylab = "Number of Orders", xlab = "Route"))
-  }else{
-    orders_list<-map(strsplit(orders_sample,":"),as.numeric)
-  #This change will revert the stops to intervals eg instead of seat 1,2 to routes 1-2,2-3
-    orders_list<-map(orders_list,function(x){c(x[1],x[2]-1)})
-  }
-} 
+orders_list<-map(strsplit(orders_sample,":"),as.numeric)
+#This change will revert the stops to intervals eg instead of seat 1,2 to routes 1-2,2-3
+orders_list<-map(orders_list,function(x){c(x[1],x[2]-1)})
+}
 
 #Create the default order list
 route_orders<-create_sample_orders()
 
-#Create the default empty vehicle
-vehicle<-matrix(data=0,ncol=inputs$stops,nrow=inputs$seats)
+#Show sample distribution
+orders_plot<-function(orders=NULL){
+    if(is.null(orders)){orders<-create_sample_orders()}
+    orders_tbl<-table(paste(map(orders,1),":",map(orders,2),sep=""))
+    return(barplot(height = orders_tbl,  ylab = "Number of Orders", xlab = "Route"))
+}
 
 #This function checks which seats are available for the given order and returns their position or returns false if no free seats are available
 is_free<-function(vehicle,order){
@@ -72,14 +72,13 @@ is_free<-function(vehicle,order){
                     vehicle[,order[1]:order[2]]==0
                   }
   
-  if (length(order)==1){ 
-    warning("There is just one number in the interval - check the data")
-    return(FALSE)
-  }else{
-    free_seats<-which(free_positions)
-  }
+  free_seats<-which(free_positions)
+  
   #This will return False if no seats are available otherwise it will return the unique rows where is possible to seat someone
-    if(length(free_seats)==0) FALSE else match(data.frame(t(unique.matrix(vehicle[free_seats,]))),data.frame(t(vehicle)))
+  
+    if(length(free_seats)==0) FALSE 
+    else if(length(free_seats)==1){free_seats}
+    else{free_seats<-match(data.frame(t(unique(vehicle[free_seats,]))),data.frame(t(vehicle)))}
 }
 
 #This function mimics the original algoritm
@@ -87,7 +86,7 @@ find_seat_orig<-function(vehicle,order){
 #It looks for empty seats
   free_seats<-is_free(vehicle,order)
 #If there are empty seats it returns the first one 
-  if (is.numeric(free_seats)){
+  if (is.numeric(free_seats)) {
     seat<-free_seats[1]
   }else{
 #Otherwise returns false
@@ -109,22 +108,22 @@ sum_probability<-function(vec,prob=prob_matrix2){
 }
 
 #Here we start the function that returns the best seat
-find_seat_probLoss<-function(vehicle=vehicle,order=order){
+find_seat_probLoss<-function(veh=vehicle,ord=order){
   
   #Find out if there are free seats for this order
-  free_seats<-is_free(vehicle,order)
+  free_seats<-is_free(veh,ord)
   
   if (is.numeric(free_seats)){
     
     #initialize some variables we need
-    vehicle_inv<-t(matrix(data=1:7,nrow=7,ncol = 3))
-    vehicle_inv[vehicle==1]<-NaN
+    vehicle_inv<-t(matrix(data=1:ncol(veh),nrow=ncol(veh),ncol = nrow(veh)))
+    vehicle_inv[veh!=1]<-NA
   
     prob_loss<-c()
   
-    seatsBefore<-replace(vehicle_inv,vehicle_inv==0,NaN)
+    seatsBefore<-replace(vehicle_inv,vehicle_inv==0,NA)
     seatsAfter<-seatsBefore
-    seatsAfter[,order[1]:order[2]]<-NaN
+    seatsAfter[,ord[1]:ord[2]]<-NA
     
     #here we calculate the probability loss
     for (i in seq_along(free_seats)){
@@ -142,11 +141,13 @@ find_seat_probLoss<-function(vehicle=vehicle,order=order){
 }
 
 #Tests the chosen algoritm and returns the results
-fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,orders=route_orders,method=find_seat_orig,plot=FALSE,reorder=TRUE){
+fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,size=inputs$sample_size,orders=NULL,method=find_seat_orig,plot=FALSE){
   
-  #create the order list
-  if(reorder){orders<-create_sample_orders(inputs$sample_size)}
+  #Create the default empty vehicle
+  vehicle<-matrix(data=0,ncol=inputs$stops,nrow=inputs$seats)
   
+  if(is.null(orders)){ orders<-create_sample_orders(size)}
+
   #create the result variables
   seated_people<-data.frame(data=0,nrow=stops,ncol=3)
   names(seated_people) <- c("order","seated","not_seated")
@@ -171,11 +172,12 @@ fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,orders=route_orders
       money<-money+as.numeric(orders_distr[price_pos,3])
       
   #We record the current state of how many passengers were sucesfully seated and not
-      if(i>1){
-        seated_people[i,]<-c(i, seated_people[j,2]+1,seated_people[j,3])
-      }else{
-        seated_people[i,]<-c(i,1,0)
-      }
+  if(i>1){
+    seated_people[i,]<-c(i, seated_people[j,2]+1,seated_people[j,3])
+  }else{
+    seated_people[i,]<-c(i,1,0)
+  }
+      
     }else{
       
       if (plot){
@@ -184,7 +186,7 @@ fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,orders=route_orders
         points(expand.grid(order[1]:order[2],1),col="red",pch=19)
       }
       
-      if(i>1){  
+      if(i>1){
         seated_people[i,]<-c(i, seated_people[j,2],seated_people[j,3]+1)
       }else{
         seated_people[i,]<-c(i,0,1)
@@ -199,7 +201,7 @@ fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,orders=route_orders
   empty_seats<-colSums(vehicle==0)
   
   test_results<-list(
-    "seat_order"=seated_people,
+    #"seat_order"=seated_people,
     "break_point"=effective_breaking_point,
     "utilization"=util,
     "empty_seats"=empty_seats,
@@ -211,12 +213,30 @@ fill_vehicle<-function(seats=inputs$seats,stops=inputs$stops,orders=route_orders
 }
 
 #Function that performs multiple tests and returns the results as a list
-perform_test<-function(count,seats=inputs$seats,stops=inputs$stops,distr=orders_distr,method=find_seat_orig){
+perform_test<-function(count,seats=inputs$seats,stops=inputs$stops,sample_size=inputs$sample_size){
   
-  result<-data.frame()
-   output<-replicate(count,c(result,fill_vehicle(seats,stops,orders_sample,method,reorder=TRUE)))
+  res<-data.frame()
+  res2<-data.frame()
+  
+  for(i in 1:count){
+  orders_sample<-create_sample_orders(sample_size)
+  
+   output<-fill_vehicle(seats,stops,orders = orders_sample)
    output<-as.data.frame(t(output))
+   res<-rbind(res,output)
+   
+   output2<-fill_vehicle(seats,stops,orders = orders_sample,method=find_seat_probLoss)
+   output2<-as.data.frame(t(output2))
+   res2<-rbind(res2,output2)
+   
+  }
+  return(list("main result"=data.frame(algoritm=c("original","probability loss"),
+                                      avg_breakpoint=c(mean(unlist(res$break_point)),mean(unlist(res2$break_point))),
+                                      avg_utilization=c(mean(unlist(res$utilization)),mean(unlist(res2$utilization))),
+                                      avg_earned=c(mean(unlist(res$earned)),mean(unlist(res2$earned)))
+                                       ),
+              "original algoritm"=res,
+              "probability loss algoritm"=res2))
 }
-
 
 

@@ -1,5 +1,5 @@
-orig<-perform_test(100)
-new<-perform_test(100,method = find_seat_probLoss)
+orig<-perform_test(10000)
+new<-perform_test(10000,method = find_seat_probLoss)
 
 print(mean(unlist(orig$utilization)))
 print(mean(unlist(new$utilization)))
@@ -12,22 +12,17 @@ hist(unlist(orig$utilization))
 hist(unlist(new$utilization))
 
 
-a<-fill_vehicle(orders=route_orders,method=find_seat_probLoss)
-b<-fill_vehicle(orders=route_orders)
+system.time(perform_test(10))
+system.time(perform_test(1000,method = find_seat_probLoss))
 
-a$utilization-b$utilization
-a$earned-b$earned
+system.time(
+for(i in 1:10){
+  fill_vehicle(reorder = TRUE)
+}
+)
 
-##1000 trials
-orig2<-perform_test(1000)
-new2<-perform_test(1000,method = find_seat_probLoss)
+a<-perform_test(1)
 
-print(mean(unlist(orig2$utilization)))
-print(mean(unlist(new2$utilization)))
-print(mean(unlist(orig2$break_point)))
-print(mean(unlist(new2$break_point)))
-print(mean(unlist(orig2$earned)))
-print(mean(unlist(new2$earned)))
+output2<-replicate(10,c(result,fill_vehicle(method=find_seat_orig)))
 
-hist(unlist(orig2$utilization))
-hist(unlist(new2$utilization))
+a<-fill_vehicle(method=find_seat_orig)
