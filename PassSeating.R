@@ -3,7 +3,7 @@
 #install.packages("denstrip")
 #install.packages("prob")
 #install.packages("tidyr")
-library(purrr)
+library(purrr) 
 library(prob)
 library(denstrip)
 library(tidyr)
